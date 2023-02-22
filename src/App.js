@@ -1,22 +1,25 @@
 import logo from './logo.svg';
 import './App.css';
+import { useEffect } from 'react';
+const PolkaKeyring = require('@polkadot/keyring');
+const MMaskHdKeyring = require('@metamask/eth-hd-keyring');
+const PolkaUtilCrypto = require('@polkadot/util-crypto');
+const MMaskEthSigUtils = require('@metamask/eth-sig-util');
+
+window.deps = {};
 
 function App() {
+  useEffect(_ => {
+    window.deps['pKring'] = PolkaKeyring;
+    window.deps['mKring'] = MMaskHdKeyring;
+    window.deps['pUtilCrypt'] = PolkaUtilCrypto;
+    window.deps['mMEthSigUtil'] = MMaskEthSigUtils;
+  }, [])
+
   return (
     <div className="App">
       <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
+        <p>Welcome, please open console and check <b>window.deps</b></p>
       </header>
     </div>
   );
