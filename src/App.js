@@ -1,6 +1,7 @@
 import logo from './logo.svg';
 import './App.css';
 import { useEffect } from 'react';
+import FireEvmKeyringsController from './libs/FireEvmKeyringsController';
 const Utils = require('./common');
 const PolkaKeyring = require('@polkadot/keyring');
 const MMaskHdKeyring = require('@metamask/eth-hd-keyring');
@@ -16,6 +17,7 @@ function App() {
     window.deps['mKring'] = MMaskHdKeyring;
     window.deps['pUtilCrypt'] = PolkaUtilCrypto;
     window.deps['mMEthSigUtil'] = MMaskEthSigUtils;
+    window.deps['hybKring'] = FireEvmKeyringsController;
   }, [])
 
   return (
