@@ -139,12 +139,15 @@ export default class FireEvmKeyringsController extends EventEmitter {
         fireKring.addFromUri(`${mnemonic}//${hdpath}`, {})
         
         await evmKring.addAccounts();    
-        const evmAccs = await evmKring.getAccounts();
-        await this.checkForDuplicate(KEYRINGS_TYPE.EVM, evmAccs);
-        await this.checkForDuplicate(KEYRINGS_TYPE.FIRE, evmAccs);
-    
+        
         this.keyrings.push(evmKring);
         this.keyrings.push(fireKring);
+
+        const evmAccs = await this.getAccounts(KEYRINGS_TYPE.EVM);
+        const fireAccs = await this.getAccounts(KEYRINGS_TYPE.FIRE);
+        
+        // await this.checkForDuplicate(KEYRINGS_TYPE.EVM, evmAccs);
+        // await this.checkForDuplicate(KEYRINGS_TYPE.FIRE, fireAccs);
         await this.persistAllKeyrings();
         this.memStore.updateState({hdpath: hdpath + 1});
         this.fullUpdate();
@@ -263,6 +266,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
     // check for dupl by checking just first elem
     async checkForDuplicate(type, newAccArr) {
         const accs = await this.getAccounts(type);
+        log.i('[checkForDuplicate] accs:', newAccArr, accs);
         let isIncl = !1;
         switch (type) {
         case KEYRINGS_TYPE.EVM:
@@ -298,7 +302,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
     // done
     async getEvmAccounts() {
         const kring = this.getKringByType(KEYRINGS_TYPE.EVM);
-        log.i('[getEvmAccounts] kring:', kring);
+        log.i('[getEvmAccounts] kring:', kring.getAccounts);
         const accs = await kring.getAccounts();
         const addrs = accs.reduce((res, arr) => res.concat(arr), []);
         return addrs.map(normalizeAddress);
@@ -517,7 +521,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
      */
     getKringByType(type) {
         log.i('[getKringByType] keyrings:', this.keyrings);
-        return this.keyrings.filter(kring => kring.type === type);
+        return this.keyrings.filter(kring => kring.type === type)[0];
     }
 
     getKringBuilderForType(type) {
