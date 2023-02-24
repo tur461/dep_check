@@ -89,30 +89,32 @@ export default class FireEvmKeyringsController extends EventEmitter {
     }
 
     /**
-   * CreateNewVaultAndRestore
-   * Destroys any old encrypted storage,
-   * creates a new encrypted store with the given password,
-   * creates a new HD wallet from the given seed with 1 account.
-   * @fires KeyringController#unlock
-   * @param {string} password - The password to encrypt the vault with.
-   * @param {Uint8Array | string} seedPhrase - The BIP39-compliant seed phrase,
-   * either as a string or Uint8Array.
-   * @returns {Promise<object>} A Promise that resolves to the state.
-   */
-  async createNewVaultAndRestore(password, seedPhrase) {
-    if (!isStr(password)) throw new Error(ERR_STR.PWD_NOT_TEXT);
-    this.password = password;
+     * CreateNewVaultAndRestore
+     * Destroys any old encrypted storage,
+     * creates a new encrypted store with the given password,
+     * creates a new HD wallet from the given seed with 1 account.
+     * @fires KeyringController#unlock
+     * @param {string} password - The password to encrypt the vault with.
+     * @param {Uint8Array | string} seedPhrase - The BIP39-compliant seed phrase,
+     * either as a string or Uint8Array.
+     * @returns {Promise<object>} A Promise that resolves to the state.
+     */
+    async createNewVaultAndRestore(password, mnemonic) {
+        if (!isStr(password)) throw new Error(ERR_STR.PWD_NOT_TEXT);
+        this.password = password;
 
-    await this.addNewKrings();
-    const [evmFirstAcc] = await this.getAccounts(KEYRINGS_TYPE.EVM);
-    const [fireFirstAcc] = await this.getAccounts(KEYRINGS_TYPE.FIRE);
-    
-    if (!evmFirstAcc) throw new Error(ERR_STR.NO_EVM_FIRST_ACC);
-    if (!fireFirstAcc) throw new Error(ERR_STR.NO_FIRE_FIRST_ACC);
+        await this.clearKrings();
+        await this.addNewKrings({ password, mnemonic });
 
-    this.setUnlocked();
-    return this.fullUpdate();
-  }
+        const [evmFirstAcc] = await this.getAccounts(KEYRINGS_TYPE.EVM);
+        const [fireFirstAcc] = await this.getAccounts(KEYRINGS_TYPE.FIRE);
+        
+        if (!evmFirstAcc) throw new Error(ERR_STR.NO_EVM_ACC);
+        if (!fireFirstAcc) throw new Error(ERR_STR.NO_FIRE_ACC);
+
+        this.setUnlocked();
+        return this.fullUpdate();
+    }
 
     async signTransaction(ethTx, _fromAddress, ctype, opts = {}) {
         const fromAddress = normalizeAddress(_fromAddress);
@@ -126,19 +128,32 @@ export default class FireEvmKeyringsController extends EventEmitter {
         return await keyring.signMessage(address, msgParams.data, opts);
     }
 
-    async addNewKrings(opts) {
-        const evmKring = await this._newKring(KEYRINGS_TYPE.EVM);
-        const fireKring = await this._newKring(KEYRINGS_TYPE.FIRE);
-        const mnemonic = pUtilCrypto.mnemonicGenerate().trim();
-        log.i('[addNewKrings]', mnemonic);
-        // manually call pvt method of @metamask/eth-hd-keyring
-        evmKring._initFromMnemonic(mnemonic);
+    async addNewKrings(opts = {}) {
+        let evmKring = null, fireKring = null; 
+        if(opts.password && opts.mnemonic) {
+            evmKring = await this._getNewKringWithData(KEYRINGS_TYPE.EVM, {
+                hdPath: "",
+                mnemonic: opts.mnemonic,
+                password: opts.password,
+            });
+            fireKring = await this._getNewKringWithData(KEYRINGS_TYPE.FIRE, {
+                hdPath: 0,
+                mnemonic: opts.mnemonic,
+                password: opts.password,
+            });
+            log.i('[addNewKrings]', opts.mnemonic);
+        } else {
+            evmKring = await this._newKring(KEYRINGS_TYPE.EVM);
+            fireKring = await this._newKring(KEYRINGS_TYPE.FIRE);
+            const mnemonic = pUtilCrypto.mnemonicGenerate().trim();
+            log.i('[addNewKrings]', mnemonic);
+            evmKring._initFromMnemonic(mnemonic);
+            const hdPath = 0;
+            fireKring.addFromUri(`${mnemonic}//${hdPath}`, {})
+            log.i('[addNewKrings]', `${mnemonic}//${hdPath}`);
+            this.memStore.updateState({hdPath: hdPath + 1});
+        }
         await evmKring.addAccounts();
-        // get current path from state and increment and update
-        const hdPath = +this.memStore.getState().hdPath;
-        // log.i('[addNewKrings] fire kring', fireKring);
-        fireKring.addFromUri(`${mnemonic}//${hdPath}`, {})
-        log.i('[addNewKrings]', `${mnemonic}//${hdPath}`);
         
         this.krings.push(evmKring);
         this.krings.push(fireKring);
@@ -148,8 +163,8 @@ export default class FireEvmKeyringsController extends EventEmitter {
         
         // await this.checkForDuplicate(KEYRINGS_TYPE.EVM, evmAccs);
         // await this.checkForDuplicate(KEYRINGS_TYPE.FIRE, fireAccs);
-        await this.persistAllKeyrings();
-        this.memStore.updateState({hdPath: hdPath + 1});
+        await this.persistAllKrings();
+        
         this.fullUpdate();
     
         return this.krings;
@@ -165,7 +180,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
         return keyring;
     }
     // done
-    async _newKringWithData(type, data) {
+    async _getNewKringWithData(type, data) {
         const keyringBuilder = this.getKringBuilderForType(type);
     
         if (!keyringBuilder) return undefined;
@@ -176,8 +191,10 @@ export default class FireEvmKeyringsController extends EventEmitter {
             if (keyring.init) await keyring.init();
         } else {
             const hdPath = +data.hdPath;
-            const mnemonic = String.fromCharCode(...data.mnemonic).trim();
-            log.i('[_newKringWithData]', `${mnemonic}//${hdPath}`);
+            const mnemonic = isStr(data.mnemonic) ? 
+                data.mnemonic : 
+                String.fromCharCode(...data.mnemonic).trim();
+            log.i('[_getNewKringWithData]', `${mnemonic}//${hdPath}`);
             await keyring.addFromUri(`${mnemonic}//${hdPath}`, {});
         }
     
@@ -185,7 +202,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
         return keyring;
     }
 
-     /**
+    /**
      * Unlock Keyrings.
      *
      * Attempts to unlock the persisted encrypted storage,
@@ -252,7 +269,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
     async _restoreKring(serialized) {
         const { type, data } = serialized;
         // log.i('[_restoreKring]', data, type);
-        const keyring = await this._newKringWithData(type, data);
+        const keyring = await this._getNewKringWithData(type, data);
         if (!keyring) {
             this._unsupportedKeyrings.push(serialized);
             return undefined;
@@ -262,6 +279,15 @@ export default class FireEvmKeyringsController extends EventEmitter {
         if(rEq(type, KEYRINGS_TYPE.EVM)) await keyring.getAccounts();
         this.krings.push(keyring);
         return keyring;
+    }
+
+    async addNewAccounts(kring) {
+        if(rEq(kring.type, KEYRINGS_TYPE.EVM)) {
+                await this.krings[0].addAccounts();
+        } else {
+            
+        }
+        this.emit(EVENT.KRING.ACCS_ADDED);
     }
 
     // done
@@ -327,12 +353,12 @@ export default class FireEvmKeyringsController extends EventEmitter {
      *
      * @returns {Promise<boolean>} Resolves to true once keyrings are persisted.
      */
-    async persistAllKeyrings() {
+    async persistAllKrings() {
         const { 
             encryptionKey, 
             encryptionSalt 
         } = this.memStore.getState();
-        log.i('[persistAllKeyrings]', this.password);
+        log.i('[persistAllKrings]', this.password);
         if (!this.password && !encryptionKey)
             throw new Error(ERR_STR.PERSIST);
         const evmSer = await this.krings[0].serialize();
@@ -351,7 +377,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
                 }
             }
         ]
-        // log.i('[persistAllKeyrings] serializedKeyrings:', serializedKeyrings);
+        // log.i('[persistAllKrings] serializedKeyrings:', serializedKeyrings);
         let vault;
         let newEncryptionKey;
 
@@ -375,7 +401,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
             vault = JSON.stringify(vaultJSON);
         }
         } else {
-            // log.i('[persistAllKeyrings]', this.password, serializedKeyrings);
+            // log.i('[persistAllKrings]', this.password, serializedKeyrings);
             vault = await this.encryptor.encrypt(this.password, serializedKeyrings);
         }
 
@@ -548,4 +574,8 @@ export const testKring = async _ => {
     log.i('[test] evm accs:', acc);
     acc = await p.getAccounts(KEYRINGS_TYPE.FIRE);
     log.i('[test] 5ire accs:', acc);
+}
+
+function setListeners(o) {
+
 }

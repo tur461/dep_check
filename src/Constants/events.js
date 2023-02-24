@@ -6,7 +6,7 @@ const EVENT = {
         UNLOCK: 'unlock_wallet',
         CREATED: 'new_kering_created',
         ACC_REMOVD: 'account_removed',
-        ACC_ADDED: 'new_account_added',
+        ACCS_ADDED: 'new_accounts_added',
     }
 }
 
