@@ -1,3 +1,5 @@
+import { defOrNotNull, jsnStr, nullOrUndef } from '../common';
+
 const { EventEmitter } = require('events');
 const ObservableStore = require('obs-store');
 const pHdKeyring = require('@polkadot/keyring');
@@ -35,8 +37,9 @@ export default class FireEvmKeyringsController extends EventEmitter {
 
         this.encryptor = opts.encryptor || mEncryptor;
         this.password = opts.password || null;
+        this.mnemonic = opts.mnemonic || null;
         this.krings = [];
-        this._unsupportedKeyrings = [];
+        this._unsupportedKrings = [];
 
     }
     // creates new wallet with one account
@@ -130,7 +133,9 @@ export default class FireEvmKeyringsController extends EventEmitter {
 
     async addNewKrings(opts = {}) {
         let evmKring = null, fireKring = null; 
-        if(opts.password && opts.mnemonic) {
+        if(defOrNotNull(opts.password) && defOrNotNull(opts.mnemonic)) {
+            this.password = opts.password;
+            this.mnemonic = opts.mnemonic;
             evmKring = await this._getNewKringWithData(KEYRINGS_TYPE.EVM, {
                 hdPath: "",
                 mnemonic: opts.mnemonic,
@@ -143,15 +148,14 @@ export default class FireEvmKeyringsController extends EventEmitter {
             });
             log.i('[addNewKrings]', opts.mnemonic);
         } else {
+            // createNewVaultAndKeychain -> createFirstKeyTree -> addNewKrings
             evmKring = await this._newKring(KEYRINGS_TYPE.EVM);
             fireKring = await this._newKring(KEYRINGS_TYPE.FIRE);
-            const mnemonic = pUtilCrypto.mnemonicGenerate().trim();
-            log.i('[addNewKrings]', mnemonic);
-            evmKring._initFromMnemonic(mnemonic);
-            const hdPath = 0;
-            fireKring.addFromUri(`${mnemonic}//${hdPath}`, {})
-            log.i('[addNewKrings]', `${mnemonic}//${hdPath}`);
-            this.memStore.updateState({hdPath: hdPath + 1});
+            // Generate & save mnemonic for the future usage
+            this.mnemonic = this.getNewRandomMnemonic();
+            log.i('[addNewKrings]', this.mnemonic);
+            evmKring._initFromMnemonic(this.mnemonic);
+            await this._addNewFireAccount(fireKring);
         }
         await evmKring.addAccounts();
         
@@ -168,38 +172,6 @@ export default class FireEvmKeyringsController extends EventEmitter {
         this.fullUpdate();
     
         return this.krings;
-    }
-
-    // done
-    async _newKring(type) {
-        const kringBuilder = this.getKringBuilderForType(type);
-        log.i('builder', kringBuilder);
-        if (!kringBuilder) return undefined;
-        const keyring = kringBuilder();
-        log.i('keyring success', type);
-        return keyring;
-    }
-    // done
-    async _getNewKringWithData(type, data) {
-        const keyringBuilder = this.getKringBuilderForType(type);
-    
-        if (!keyringBuilder) return undefined;
-    
-        const keyring = keyringBuilder();
-        if(rEq(type, KEYRINGS_TYPE.EVM)) {
-            await keyring.deserialize(data);
-            if (keyring.init) await keyring.init();
-        } else {
-            const hdPath = +data.hdPath;
-            const mnemonic = isStr(data.mnemonic) ? 
-                data.mnemonic : 
-                String.fromCharCode(...data.mnemonic).trim();
-            log.i('[_getNewKringWithData]', `${mnemonic}//${hdPath}`);
-            await keyring.addFromUri(`${mnemonic}//${hdPath}`, {});
-        }
-    
-    
-        return keyring;
     }
 
     /**
@@ -229,6 +201,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
                 );
                 vault = result.vault;
                 this.password = password;
+                this.mnemonic = vault.mnemonic;
 
                 this.memStore.updateState({
                     encryptionKey: result.exportedKeyString,
@@ -252,10 +225,11 @@ export default class FireEvmKeyringsController extends EventEmitter {
         } else {
             vault = await this.encryptor.decrypt(password, encryptedVault);
             this.password = password;
+            this.mnemonic = vault.mnemonic;
         }
 
-        await Promise.all(vault.map(this._restoreKring.bind(this)));
-        await this._updateMemStoreKeyrings();
+        await Promise.all(vault.krings.map(this._restoreKring.bind(this)));
+        await this._updateMemStoreKrings();
         return this.krings;
     }
 
@@ -271,7 +245,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
         // log.i('[_restoreKring]', data, type);
         const keyring = await this._getNewKringWithData(type, data);
         if (!keyring) {
-            this._unsupportedKeyrings.push(serialized);
+            this._unsupportedKrings.push(serialized);
             return undefined;
         }
 
@@ -281,17 +255,47 @@ export default class FireEvmKeyringsController extends EventEmitter {
         return keyring;
     }
 
+    // done
+    async _newKring(type) {
+        const kringBuilder = this.getKringBuilderForType(type);
+        log.i('builder', kringBuilder);
+        if (!kringBuilder) return undefined;
+        const keyring = kringBuilder();
+        log.i('keyring success', type);
+        return keyring;
+    }
+
+    // done
+    async _getNewKringWithData(type, data) {
+        const kringBuilder = this.getKringBuilderForType(type);
+    
+        if (!kringBuilder) return undefined;
+    
+        const kring = kringBuilder();
+        if(rEq(type, KEYRINGS_TYPE.EVM)) {
+            await kring.deserialize(data);
+            if (kring.init) await kring.init();
+        } else await this._addNewFireAccount(kring)
+    
+        return kring;
+    }
+    // done
+    // 
     async addNewAccounts(kring) {
+        if(nullOrUndef(this.password)) throw Error(ERR_STR.ADD_ACC_FAILURE_PWD);
         if(rEq(kring.type, KEYRINGS_TYPE.EVM)) {
-                await this.krings[0].addAccounts();
+            if(nullOrUndef(this.krings[0])) throw Error(ERR_STR.ADD_EVM_ACC_FAILURE_KRNG);
+            await this.krings[0].addAccounts();
         } else {
-            
+            if(nullOrUndef(this.mnemonic)) throw Error(ERR_STR.ADD_5IRE_ACC_FAILURE_MNC);
+            if(nullOrUndef(this.krings[1])) throw Error(ERR_STR.ADD_FIRE_ACC_FAILURE_KRNG);
+            await this._addNewFireAccount(this.krings[1]);
         }
         this.emit(EVENT.KRING.ACCS_ADDED);
     }
 
     // done
-    // check for dupl by checking just first elem
+    // check for duplicate accounts by checking just first 1
     async checkForDuplicate(type, newAccArr) {
         const accs = await this.getAccounts(type);
         log.i('[checkForDuplicate] accs:', newAccArr, accs);
@@ -336,11 +340,6 @@ export default class FireEvmKeyringsController extends EventEmitter {
         const addrs = accs.reduce((res, arr) => res.concat(arr), []);
         return addrs.map(normalizeAddress);
     }
-    // done
-    getFireAccounts() {
-        const kring = this.getKringByType(KEYRINGS_TYPE.FIRE);
-        return kring.getPairs().map(p => p.address);
-    }
 
     /**
      * done
@@ -363,46 +362,48 @@ export default class FireEvmKeyringsController extends EventEmitter {
             throw new Error(ERR_STR.PERSIST);
         const evmSer = await this.krings[0].serialize();
         
-        const serializedKeyrings = [
-            {
-                type: this.krings[0].type,
-                data: evmSer,
-            },
-            {
-                type: this.krings[1].type,
-                data: {
-                    hdPath: this.memStore.getState().hdPath,
-                    mnemonic: evmSer.mnemonic,
-                    numberOfAccounts: this.krings[1].pairs.length,
+        const vaultPlain = {
+            krings: [
+                {
+                    type: this.krings[0].type,
+                    data: evmSer,
+                },
+                {
+                    type: this.krings[1].type,
+                    data: {
+                        hdPath: this.memStore.getState().hdPath,
+                        numberOfAccounts: this.krings[1].pairs.length,
+                    }
                 }
-            }
-        ]
-        // log.i('[persistAllKrings] serializedKeyrings:', serializedKeyrings);
+            ],
+            mnemonic: this.mnemonic,
+        }
+        // log.i('[persistAllKrings] vaultPlain:', vaultPlain);
         let vault;
         let newEncryptionKey;
 
         if (this.cacheEncryptionKey) {
-        if (this.password) {
-            const { vault: newVault, exportedKeyString } =
-            await this.encryptor.encryptWithDetail(
-                this.password,
-                serializedKeyrings,
-            );
+            if (this.password) {
+                const { vault: newVault, exportedKeyString } =
+                await this.encryptor.encryptWithDetail(
+                    this.password,
+                    vaultPlain,
+                );
 
-            vault = newVault;
-            newEncryptionKey = exportedKeyString;
-        } else if (encryptionKey) {
-            const key = await this.encryptor.importKey(encryptionKey);
-            const vaultJSON = await this.encryptor.encryptWithKey(
-            key,
-            serializedKeyrings,
-            );
-            vaultJSON.salt = encryptionSalt;
-            vault = JSON.stringify(vaultJSON);
-        }
+                vault = newVault;
+                newEncryptionKey = exportedKeyString;
+            } else if (encryptionKey) {
+                const key = await this.encryptor.importKey(encryptionKey);
+                const vaultJSON = await this.encryptor.encryptWithKey(
+                    key,
+                    vaultPlain,
+                );
+                vaultJSON.salt = encryptionSalt;
+                vault = jsnStr(vaultJSON);
+            }
         } else {
-            // log.i('[persistAllKrings]', this.password, serializedKeyrings);
-            vault = await this.encryptor.encrypt(this.password, serializedKeyrings);
+            // log.i('[persistAllKrings]', this.password, vaultPlain);
+            vault = await this.encryptor.encrypt(this.password, vaultPlain);
         }
 
         if (!vault) throw new Error(ERR_STR.NO_VAULT_INFO);
@@ -411,9 +412,9 @@ export default class FireEvmKeyringsController extends EventEmitter {
 
         // The keyring updates need to be announced before updating the encryptionKey
         // so that the updated keyring gets propagated to the extension first.
-        // Not calling _updateMemStoreKeyrings results in the wrong account being selected
+        // Not calling _updateMemStoreKrings results in the wrong account being selected
         // in the extension.
-        await this._updateMemStoreKeyrings();
+        await this._updateMemStoreKrings();
         if (newEncryptionKey)
             this.memStore.updateState({ encryptionKey: newEncryptionKey });
 
@@ -426,7 +427,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
      *
      * Updates the in-memory keyrings, without persisting.
      */
-    async _updateMemStoreKeyrings() {
+    async _updateMemStoreKrings() {
         const keyrings = await Promise.all(
             this.krings.map(this.displayForKeyring.bind(this)),
         );
@@ -490,29 +491,20 @@ export default class FireEvmKeyringsController extends EventEmitter {
      */
     async setLocked() {
         delete this.password;
+        delete this.mnemonic;
 
         // set locked
         this.memStore.updateState({
-        isUnlocked: false,
-        encryptionKey: null,
-        encryptionSalt: null,
+            isUnlocked: false,
+            encryptionKey: null,
+            encryptionSalt: null,
         });
 
         // remove keyrings
         this.krings = [];
-        await this._updateMemStoreKeyrings();
+        await this._updateMemStoreKrings();
         this.emit(EVENT.KRING.LOCK);
         return this.fullUpdate();
-    }
-
-    /**
-     * Unlock Keyrings
-     * Unlocks the keyrings.
-     * @fires KeyringController#unlock
-     */
-    setUnlocked() {
-        this.memStore.updateState({ isUnlocked: true });
-        this.emit(EVENT.KRING.UNLOCK);
     }
 
     /**
@@ -526,6 +518,23 @@ export default class FireEvmKeyringsController extends EventEmitter {
         this.memStore.updateState({
         keyrings: [],
         });
+    }
+
+    async _addNewFireAccount(kring) {
+        const uri = this.getFireUriStr();
+        log.i('[_addNewFireAccount]', uri);
+        await kring.addFromUri(uri, {});
+        this.updateFireHdPath();
+    }
+
+    /**
+     * Unlock Keyrings
+     * Unlocks the keyrings.
+     * @fires KeyringController#unlock
+     */
+    setUnlocked() {
+        this.memStore.updateState({ isUnlocked: true });
+        this.emit(EVENT.KRING.UNLOCK);
     }
 
     fullUpdate() {
@@ -548,6 +557,26 @@ export default class FireEvmKeyringsController extends EventEmitter {
         return this.kringBuilders.find(
             builder => builder.type === type
         );
+    }
+
+    // done
+    getFireAccounts() {
+        const kring = this.getKringByType(KEYRINGS_TYPE.FIRE);
+        return kring.getPairs().map(p => p.address);
+    }
+
+    getFireUriStr() {
+        return `${this.mnemonic}//${this.memStore.getState().hdPath}`;
+    }
+
+    updateFireHdPath() {
+        this.memStore.updateState({
+            hdPath: this.memStore.getState().hdPath + 1
+        });
+    }
+
+    getNewRandomMnemonic() {
+        return pUtilCrypto.mnemonicGenerate().trim()
     }
 }
 

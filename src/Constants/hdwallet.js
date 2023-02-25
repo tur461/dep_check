@@ -8,6 +8,10 @@ const ERR_STR = {
     NO_EVM_FIRST_ACC: 'KeyringController - EVM First Account not found.',
     NO_FIRE_ACC: 'KeyringController - No 5IRE account found on keychain.',
     NO_FIRE_FIRST_ACC: 'KeyringController - 5IRE First Account not found.',
+    ADD_ACC_FAILURE_PWD: 'password is null/not defined, new account or accounts could not be added.',
+    ADD_EVM_ACC_FAILURE_KRNG: 'keyring not defined, new EVM account or accounts could not be added.',
+    ADD_FIRE_ACC_FAILURE_KRNG: 'keyring not defined, new 5IRE account or accounts could not be added.',
+    ADD_5IRE_ACC_FAILURE_MNC: 'mnemonic is null/not defined, new 5IRE account or accounts could not be added',
 }
 const CHAIN_TYPE = {
     EVM: 'ethereum_chain',

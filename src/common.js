@@ -36,6 +36,11 @@ const cloneShallow = v => isPrimitive(v) ? v :
 
 const noHexPrefix = v => v.slice(2);
 
+const decAry2str = a => String.fromCharCode(...a);
+
+const nullOrUndef = v => v === undefined || v === null;
+
+const defOrNotNull = v => !nullOrUndef(v) && notEmpty(v);
 export {
     rEq,
     isFn,
@@ -52,6 +57,9 @@ export {
     notEmpty,
     contains,
     cloneDeep,
+    decAry2str,
     noHexPrefix,
+    nullOrUndef,
+    defOrNotNull,
     cloneShallow,
 }
