@@ -1,3 +1,4 @@
+
 const toB64 = s => btoa(s);
 const eHandle = e => e.preventDefault() || !0;
 const isArr = a => a instanceof Array;
@@ -35,15 +36,16 @@ const cloneShallow = v => isPrimitive(v) ? v :
 
 const noHexPrefix = v => v.slice(2);
 
-const log = (_ => {
-    return {
-        i: function(){ console.log(...arguments) },
-    }
-})()
+const decAry2str = a => String.fromCharCode(...a);
+
+const nullOrUndef = v => v === undefined || v === null;
+
+const defOrNotNull = v => !nullOrUndef(v) && notEmpty(v);
+
+const str2u8ary = s => (new TextEncoder()).encode(s);
 
 export {
     rEq,
-    log,
     isFn,
     isStr,
     isNum,
@@ -58,6 +60,10 @@ export {
     notEmpty,
     contains,
     cloneDeep,
+    str2u8ary,
+    decAry2str,
     noHexPrefix,
+    nullOrUndef,
+    defOrNotNull,
     cloneShallow,
 }
