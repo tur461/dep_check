@@ -1,4 +1,4 @@
-import { defOrNotNull, jsnStr, nullOrUndef } from '../common';
+import { defOrNotNull, isFn, jsnStr, nullOrUndef, str2u8ary } from '../common';
 
 const { EventEmitter } = require('events');
 const ObservableStore = require('obs-store');
@@ -119,16 +119,32 @@ export default class FireEvmKeyringsController extends EventEmitter {
         return this.fullUpdate();
     }
 
-    async signTransaction(ethTx, _fromAddress, ctype, opts = {}) {
-        const fromAddress = normalizeAddress(_fromAddress);
-        const keyring = await this.getKeyringForAccount(fromAddress);
-        return await keyring.signTransaction(fromAddress, ethTx, opts);
+    async signTransaction(type, tx, fromAddr, opts = {}) {
+        // const fromAddr = normalizeAddress(_fromAddress);
+        const kring = await this.getKringByAddr(type, fromAddr);
+        let signedTx = '';
+        if(rEq(type, KEYRINGS_TYPE.EVM)) {
+            signedTx = await kring.signTransaction(fromAddr, tx, opts);
+        } else {
+            // handle for polkadot
+
+        }
+        return signedTx;
     }
 
-    async signMessage(msgParams, ctype, opts = {}) {
+    async signMessage(type, msgParams) {
+        if(nullOrUndef(this.password)) throw Error(ERR_STR.FAILURE_PWD_LOCKED);
         const address = normalizeAddress(msgParams.from);
-        const keyring = await this.getKeyringForAccount(address);
-        return await keyring.signMessage(address, msgParams.data, opts);
+        let sig = '';
+        const m = msgParams.data;
+        if(rEq(type, KEYRINGS_TYPE.EVM)) {
+            if(nullOrUndef(this.krings[0])) throw Error(ERR_STR.ADD_EVM_ACC_FAILURE_KRNG);
+            sig = await this.krings[0].signMessage(address, m);
+        } else {
+            if(nullOrUndef(this.krings[1])) throw Error(ERR_STR.ADD_FIRE_ACC_FAILURE_KRNG);
+            sig = await this.sign(isStr(m) ? str2u8ary(m) : m);
+        }
+        return sig;
     }
 
     async addNewKrings(opts = {}) {
@@ -280,10 +296,10 @@ export default class FireEvmKeyringsController extends EventEmitter {
         return kring;
     }
     // done
-    // 
-    async addNewAccounts(kring) {
-        if(nullOrUndef(this.password)) throw Error(ERR_STR.ADD_ACC_FAILURE_PWD);
-        if(rEq(kring.type, KEYRINGS_TYPE.EVM)) {
+    // success when submitPassword() has been called or wallet unlocked 
+    async addNewAccount(type) {
+        if(nullOrUndef(this.password)) throw Error(ERR_STR.FAILURE_PWD_LOCKED);
+        if(rEq(type, KEYRINGS_TYPE.EVM)) {
             if(nullOrUndef(this.krings[0])) throw Error(ERR_STR.ADD_EVM_ACC_FAILURE_KRNG);
             await this.krings[0].addAccounts();
         } else {
@@ -291,7 +307,37 @@ export default class FireEvmKeyringsController extends EventEmitter {
             if(nullOrUndef(this.krings[1])) throw Error(ERR_STR.ADD_FIRE_ACC_FAILURE_KRNG);
             await this._addNewFireAccount(this.krings[1]);
         }
-        this.emit(EVENT.KRING.ACCS_ADDED);
+        this.emit(EVENT.KRING.ACC_ADDED);
+    }
+
+    // success when submitPassword() has been called or wallet unlocked
+    async removeAccount(type, addr) {
+        if(nullOrUndef(this.password)) throw Error(ERR_STR.FAILURE_PWD_LOCKED);
+        if(rEq(type, KEYRINGS_TYPE.EVM)) {
+            if(nullOrUndef(this.krings[0])) throw Error(ERR_STR.ADD_EVM_ACC_FAILURE_KRNG);
+            if(isFn(this.krings[0].removeAccount)) await this.krings[0].removeAccount(addr);
+            else log.i();
+        } else {
+            if(nullOrUndef(this.mnemonic)) throw Error(ERR_STR.ADD_5IRE_ACC_FAILURE_MNC);
+            if(nullOrUndef(this.krings[1])) throw Error(ERR_STR.ADD_FIRE_ACC_FAILURE_KRNG);
+            await this.krings[1].removePair(addr);
+        }
+        this.emit(EVENT.KRING.ACC_REMOVED);
+    }
+
+    // success when submitPassword() has been called or wallet unlocked
+    async exportPvtKey(type, addr) {
+        if(nullOrUndef(this.password)) throw Error(ERR_STR.FAILURE_PWD_LOCKED);
+        if(rEq(type, KEYRINGS_TYPE.EVM)) {
+            if(nullOrUndef(this.krings[0])) throw Error(ERR_STR.ADD_EVM_ACC_FAILURE_KRNG);
+            if(isFn(this.krings[0].exportAccount)) await this.krings[0].exportAccount(addr);
+            else log.i();
+        } else {
+            if(nullOrUndef(this.mnemonic)) throw Error(ERR_STR.ADD_5IRE_ACC_FAILURE_MNC);
+            if(nullOrUndef(this.krings[1])) throw Error(ERR_STR.ADD_FIRE_ACC_FAILURE_KRNG);
+            await this.krings[1].removePair(addr);
+        }
+        this.emit(EVENT.KRING.ACC_REMOVED);
     }
 
     // done
@@ -525,6 +571,15 @@ export default class FireEvmKeyringsController extends EventEmitter {
         log.i('[_addNewFireAccount]', uri);
         await kring.addFromUri(uri, {});
         this.updateFireHdPath();
+    }
+
+    async getKringByAddr(type, addr) {
+        if(rEq(type, KEYRINGS_TYPE.EVM)) {
+
+        } else {
+
+        }
+        return kring;
     }
 
     /**

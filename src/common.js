@@ -41,6 +41,9 @@ const decAry2str = a => String.fromCharCode(...a);
 const nullOrUndef = v => v === undefined || v === null;
 
 const defOrNotNull = v => !nullOrUndef(v) && notEmpty(v);
+
+const str2u8ary = s => (new TextEncoder()).encode(s);
+
 export {
     rEq,
     isFn,
@@ -57,6 +60,7 @@ export {
     notEmpty,
     contains,
     cloneDeep,
+    str2u8ary,
     decAry2str,
     noHexPrefix,
     nullOrUndef,
