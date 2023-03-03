@@ -24,9 +24,15 @@ const KEYRINGS_TYPE = {
     FIRE: 'ed25519',
     FIRE_DEF: 'sr25519',
   };
+const CRPT_SCHEME = {
+    ED: 'ed25519',
+    SR: 'sr25519',
+    ETH: 'ethereum',
+}
 
 export {
     ERR_STR,
     CHAIN_TYPE,
+    CRPT_SCHEME,
     KEYRINGS_TYPE,
 }

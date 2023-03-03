@@ -1,5 +1,3 @@
-import { defOrNotNull, isFn, jsnStr, nullOrUndef, str2u8ary } from '../common';
-
 const { EventEmitter } = require('events');
 const ObservableStore = require('obs-store');
 const pHdKeyring = require('@polkadot/keyring');
@@ -7,9 +5,19 @@ const { EVENT } = require('../Constants/events');
 const pUtilCrypto = require('@polkadot/util-crypto');
 const mHdKeyring = require('@metamask/eth-hd-keyring');
 const mEncryptor = require('@metamask/browser-passworder');
-const { KEYRINGS_TYPE, ERR_STR } = require('../Constants/hdwallet');
-const { rEq, isStr, noHexPrefix, log, isEmpty } = require('../utils/common');
-
+const { KEYRINGS_TYPE, ERR_STR, CRPT_SCHEME } = require('../Constants/hdwallet');
+const { 
+    log,
+    rEq,
+    isFn,
+    isStr,
+    jsnStr,
+    isEmpty,
+    str2u8ary,
+    nullOrUndef,
+    noHexPrefix,
+    defOrNotNull,
+} = require('../utils/common');
 const defaultKringBuilders = [
     kringBuilder(mHdKeyring, KEYRINGS_TYPE.EVM),
     kringBuilder(pHdKeyring.Keyring, KEYRINGS_TYPE.FIRE),
@@ -40,6 +48,9 @@ export default class FireEvmKeyringsController extends EventEmitter {
         this.mnemonic = opts.mnemonic || null;
         this.krings = [];
         this._unsupportedKrings = [];
+        // This option allows the controller to cache an exported key
+        // for use in decrypting and encrypting data without password
+        this.cacheEncryptionKey = Boolean(opts.cacheEncryptionKey);
 
     }
     // creates new wallet with one account
@@ -88,7 +99,8 @@ export default class FireEvmKeyringsController extends EventEmitter {
                 evmAccount: hexAccount, 
                 fireAccount: fireFirstAcc 
         });
-        return null;
+        this.setUnlocked();
+        return this.fullUpdate();
     }
 
     /**
@@ -115,6 +127,12 @@ export default class FireEvmKeyringsController extends EventEmitter {
         if (!evmFirstAcc) throw new Error(ERR_STR.NO_EVM_ACC);
         if (!fireFirstAcc) throw new Error(ERR_STR.NO_FIRE_ACC);
 
+        const hexAccount = normalizeAddress(evmFirstAcc);
+        this.emit(
+            EVENT.NEW_VAULT, { 
+                evmAccount: hexAccount, 
+                fireAccount: fireFirstAcc 
+            });
         this.setUnlocked();
         return this.fullUpdate();
     }
@@ -297,16 +315,14 @@ export default class FireEvmKeyringsController extends EventEmitter {
     }
     // done
     // success when submitPassword() has been called or wallet unlocked 
-    async addNewAccount(type) {
+    async addNewAccount() {
         if(nullOrUndef(this.password)) throw Error(ERR_STR.FAILURE_PWD_LOCKED);
-        if(rEq(type, KEYRINGS_TYPE.EVM)) {
-            if(nullOrUndef(this.krings[0])) throw Error(ERR_STR.ADD_EVM_ACC_FAILURE_KRNG);
-            await this.krings[0].addAccounts();
-        } else {
-            if(nullOrUndef(this.mnemonic)) throw Error(ERR_STR.ADD_5IRE_ACC_FAILURE_MNC);
-            if(nullOrUndef(this.krings[1])) throw Error(ERR_STR.ADD_FIRE_ACC_FAILURE_KRNG);
-            await this._addNewFireAccount(this.krings[1]);
-        }
+        if(nullOrUndef(this.mnemonic)) throw Error(ERR_STR.ADD_5IRE_ACC_FAILURE_MNC);
+        if(nullOrUndef(this.krings[0])) throw Error(ERR_STR.ADD_EVM_ACC_FAILURE_KRNG);
+        if(nullOrUndef(this.krings[1])) throw Error(ERR_STR.ADD_FIRE_ACC_FAILURE_KRNG);
+        await this.krings[0].addAccounts();
+        await this._addNewFireAccount(this.krings[1]);
+        
         this.emit(EVENT.KRING.ACC_ADDED);
     }
 
@@ -326,7 +342,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
     }
 
     // success when submitPassword() has been called or wallet unlocked
-    async exportPvtKey(type, addr) {
+    async exportPvtKey(type, addr, pass) {
         if(nullOrUndef(this.password)) throw Error(ERR_STR.FAILURE_PWD_LOCKED);
         if(rEq(type, KEYRINGS_TYPE.EVM)) {
             if(nullOrUndef(this.krings[0])) throw Error(ERR_STR.ADD_EVM_ACC_FAILURE_KRNG);
@@ -335,9 +351,9 @@ export default class FireEvmKeyringsController extends EventEmitter {
         } else {
             if(nullOrUndef(this.mnemonic)) throw Error(ERR_STR.ADD_5IRE_ACC_FAILURE_MNC);
             if(nullOrUndef(this.krings[1])) throw Error(ERR_STR.ADD_FIRE_ACC_FAILURE_KRNG);
-            await this.krings[1].removePair(addr);
+            // await this.krings[1].removePair(addr);
+
         }
-        this.emit(EVENT.KRING.ACC_REMOVED);
     }
 
     // done
@@ -561,21 +577,21 @@ export default class FireEvmKeyringsController extends EventEmitter {
     async clearKrings() {
         // clear keyrings from memory
         this.krings = [];
-        this.memStore.updateState({
-        keyrings: [],
-        });
+        this.memStore.updateState({ keyrings: [] });
     }
 
     async _addNewFireAccount(kring) {
         const uri = this.getFireUriStr();
         log.i('[_addNewFireAccount]', uri);
-        await kring.addFromUri(uri, {});
+        await kring.addFromUri(uri, {}, CRPT_SCHEME.SR);
         this.updateFireHdPath();
     }
 
     async getKringByAddr(type, addr) {
+        if(nullOrUndef(this.password)) throw Error(ERR_STR.FAILURE_PWD_LOCKED);
+        let kring = null;
         if(rEq(type, KEYRINGS_TYPE.EVM)) {
-
+            this.krings[0].filter(kr => kr);
         } else {
 
         }
@@ -632,6 +648,16 @@ export default class FireEvmKeyringsController extends EventEmitter {
 
     getNewRandomMnemonic() {
         return pUtilCrypto.mnemonicGenerate().trim()
+    }
+
+    getMnemonic(pass) {
+        let mn = null;
+        if(defOrNotNull(this.password)) {
+            if(rEq(this.password, pass)) mn = this.mnemonic;
+        } else {
+
+        }
+        return this.mnemonic;
     }
 }
 
