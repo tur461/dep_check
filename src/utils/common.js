@@ -50,6 +50,8 @@ const defOrNotNull = v => !nullOrUndef(v) && notEmpty(v);
 
 const str2u8ary = s => (new TextEncoder()).encode(s);
 
+const _now = _ => Date.now();
+
 // http version
 const untilFinalized_HTTP = o => {
     let ivalGapms = 10;
@@ -117,6 +119,7 @@ const untilFinalized = o => untilFinalized_WS(o);
 export {
     rEq,
     log,
+    _now,
     isFn,
     isStr,
     isNum,

@@ -286,7 +286,18 @@ export default class FireEvmKeyringsController extends EventEmitter {
         // getAccounts also validates the accounts for some keyrings
         if(rEq(type, KEYRINGS_TYPE.EVM)) await keyring.getAccounts();
         this.krings.push(keyring);
-        return keyring;
+        log.i(type, data);
+        // add accounts one less as first one would have been created already
+        for(
+            let i = 0; 
+            i < data.numberOfAccounts - 1; 
+            await (
+                rEq(type, KEYRINGS_TYPE.EVM) ? 
+                keyring.addAccounts() : 
+                this._addNewFireAccount(keyring)
+            ),
+            ++i
+        );
     }
 
     // done
@@ -322,7 +333,7 @@ export default class FireEvmKeyringsController extends EventEmitter {
         if(nullOrUndef(this.krings[1])) throw Error(ERR_STR.ADD_FIRE_ACC_FAILURE_KRNG);
         await this.krings[0].addAccounts();
         await this._addNewFireAccount(this.krings[1]);
-        
+        await this.persistAllKrings();
         this.emit(EVENT.KRING.ACC_ADDED);
     }
 
@@ -521,7 +532,9 @@ export default class FireEvmKeyringsController extends EventEmitter {
      * @returns {Promise<object>} A Promise that resolves to the state.
      */
     async submitPassword(password) {
+        log.i('submitPassword() called');
         this.krings = await this.unlockKrings(password);
+        log.i('submit password about to return', this.krings);
         this.setUnlocked();
         return this.fullUpdate();
     }
